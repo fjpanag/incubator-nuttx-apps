@@ -37,6 +37,124 @@
 #if !defined(CONFIG_NSH_ALTCONDEV) && !defined(HAVE_USB_CONSOLE) && \
     !defined(HAVE_USB_KEYBOARD)
 
+
+#include "netutils/netlib.h"
+#include <sys/mount.h>
+#include <netinet/in.h>
+#include <netdb.h>
+#include <time.h>
+#include <sys/time.h>
+#include <stdlib.h>
+
+static int sd;
+
+void reproduce_issue()
+{
+	/* Wait for the PHY to detect the link. */
+
+	sleep(5);
+
+
+	/* Mount procfs. */
+
+	mount(NULL, "/proc", "procfs", 0, NULL);
+
+
+	/* Configure the Ethernet interface. */
+
+	/*
+	 * Note! The following may need to be adjusted
+	 * for your network configuration.
+	 */
+
+	netlib_ifdown("eth0");
+
+	uint8_t mac[6] = { 0x80, 0x1F, 0x12, 0x38, 0xDD, 0x93 };
+	netlib_setmacaddr("eth0", mac);
+
+	struct in_addr addr;
+
+	addr.s_addr = htonl(0xc0a801c8);
+	netlib_set_ipv4addr("eth0", &addr);
+
+	addr.s_addr = htonl(0xffffff00);
+	netlib_set_ipv4netmask("eth0", &addr);
+
+	addr.s_addr = htonl(0xc0a80101);
+	netlib_set_dripv4addr("eth0", &addr);
+
+	addr.s_addr = htonl(0x08080808);
+	netlib_set_ipv4dnsaddr(&addr);
+
+	netlib_ifup("eth0");
+
+
+	/* Connect to a server. */
+
+	struct sockaddr_in server;
+
+	char serv[16];
+	itoa(1883, serv, 10);
+
+	struct addrinfo hints;
+	memset(&hints, 0, sizeof(struct addrinfo));
+	hints.ai_family = AF_INET;
+	hints.ai_socktype = SOCK_STREAM;
+
+	struct addrinfo * info;
+
+	if (getaddrinfo("test.mosquitto.org", serv, &hints, &info) != 0)
+		return;
+
+	memcpy(&server, info->ai_addr, info->ai_addrlen);
+
+	freeaddrinfo(info);
+
+	if (server.sin_family != AF_INET)
+		return;
+
+	sd = socket(AF_INET, SOCK_STREAM, 0);
+
+	struct timeval tv;
+	tv.tv_sec  = 5;
+	tv.tv_usec = 0;
+	setsockopt(sd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(struct timeval));
+	setsockopt(sd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(struct timeval));
+
+	connect(sd, (struct sockaddr*)&server, sizeof(struct sockaddr_in));
+
+	send(sd, "some data", strlen("some data"), 0);
+
+
+	/*
+	 * Now everything is set-up correctly to reproduce the issue.
+	 * A TCP connection is active, we only have to "properly"
+	 * close it to trigger the crash.
+	 */
+
+	/*
+	 * Note that the scheduler is locked here.
+	 * This is important to reproduce the issue.
+	 * It simulates the interface going down, before the
+	 * server has the chance to send a FIN ACK.
+	 */
+
+	sched_lock();
+
+	close(sd);
+	netlib_ifdown("eth0");
+
+	sched_unlock();
+
+
+	/* The system should have crashed now. */
+
+	while (1)
+		sleep(1);
+}
+
+
+
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
@@ -100,6 +218,10 @@ int nsh_consolemain(int argc, FAR char *argv[])
 
   nsh_initscript(&pstate->cn_vtbl);
 #endif
+
+  /* Reproduce the TCP issue. */
+
+  reproduce_issue();
 
   /* Execute the session */
 
