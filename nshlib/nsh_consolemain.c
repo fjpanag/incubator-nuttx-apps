@@ -42,6 +42,7 @@
 #include <sys/mount.h>
 #include <netinet/in.h>
 #include <netdb.h>
+#include <syslog.h>
 #include <time.h>
 #include <sys/time.h>
 #include <stdlib.h>
@@ -52,15 +53,21 @@ void reproduce_issue()
 {
 	/* Wait for the PHY to detect the link. */
 
+	syslog(LOG_INFO, "Waiting for Ethernet link.\n");
+
 	sleep(5);
 
 
 	/* Mount procfs. */
 
+	syslog(LOG_INFO, "Mounting procfs.\n");
+
 	mount(NULL, "/proc", "procfs", 0, NULL);
 
 
 	/* Configure the Ethernet interface. */
+
+	syslog(LOG_INFO, "eth0 configuration.\n");
 
 	/*
 	 * Note! The following may need to be adjusted
@@ -90,6 +97,8 @@ void reproduce_issue()
 
 
 	/* Connect to a server. */
+
+	syslog(LOG_INFO, "Connecting to server.\n");
 
 	struct sockaddr_in server;
 
@@ -123,6 +132,8 @@ void reproduce_issue()
 
 	connect(sd, (struct sockaddr*)&server, sizeof(struct sockaddr_in));
 
+	syslog(LOG_INFO, "Sending dummy data.\n");
+
 	send(sd, "some data", strlen("some data"), 0);
 
 
@@ -139,6 +150,8 @@ void reproduce_issue()
 	 * server has the chance to send a FIN ACK.
 	 */
 
+	syslog(LOG_INFO, "Triggering issue now.\n");
+
 	sched_lock();
 
 	close(sd);
@@ -148,6 +161,8 @@ void reproduce_issue()
 
 
 	/* The system should have crashed now. */
+
+	syslog(LOG_INFO, "The system must have already crashed.\n");
 
 	while (1)
 		sleep(1);
